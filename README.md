@@ -17,7 +17,7 @@ Edit `.env`:
 
 ```bash
 ROCKETCHAT_ENDPOINT=https://chat.example.com
-ROCKETCHAT_USER_ID=ccQSk5mBqPJPcFYRd
+ROCKETCHAT_USER_ID=your-user-id
 ROCKETCHAT_AUTH_TOKEN=your-meteor-login-token
 WEBHOOK_ENDPOINT=https://gotify.example.com/message?token=your-gotify-app-token
 HIDE_DETAILS=true
