@@ -1,0 +1,7 @@
+services:
+  rocketchat-gotify:
+    build: .
+    image: rocketchat-gotify:local
+    restart: unless-stopped
+    env_file:
+      - .env

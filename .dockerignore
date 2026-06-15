@@ -1,0 +1,11 @@
+.env
+.git
+.github
+.history
+Dockerfile
+README.md
+node_modules
+dist
+bun.lockb
+npm-debug.log
+*.local
