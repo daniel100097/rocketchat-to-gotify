@@ -38,10 +38,10 @@ docker build -t rocketchat-gotify .
 docker run --env-file .env rocketchat-gotify
 ```
 
-Or use Compose:
+Or use Compose with the published image:
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
 ## GitHub Container Registry
@@ -51,13 +51,13 @@ The workflow in `.github/workflows/container.yml` builds the image on pull reque
 Published image:
 
 ```bash
-ghcr.io/<owner>/<repo>:master
+ghcr.io/daniel100097/rocketchat-to-gotify:latest
 ```
 
 Run the published image:
 
 ```bash
-docker run --env-file .env ghcr.io/<owner>/<repo>:master
+docker run --env-file .env ghcr.io/daniel100097/rocketchat-to-gotify:latest
 ```
 
 ## Browser Token

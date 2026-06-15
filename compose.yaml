@@ -1,7 +1,7 @@
 services:
   rocketchat-gotify:
-    build: .
-    image: rocketchat-gotify:local
+    image: ghcr.io/daniel100097/rocketchat-to-gotify:latest
+    pull_policy: always
     restart: unless-stopped
     env_file:
       - .env
