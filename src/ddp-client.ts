@@ -27,11 +27,17 @@ export class DdpClient {
   private readonly pending = new Map<string, PendingCall>();
   private readonly ready = new Map<string, PendingCall>();
   private readonly debugEnabled = Bun.env.DEBUG === "true";
+  private readonly closed: Promise<Error>;
+  private resolveClosed!: (error: Error) => void;
 
   constructor(
     private readonly url: string,
     private readonly onChanged: (message: DdpChangedMessage) => void
-  ) {}
+  ) {
+    this.closed = new Promise((resolve) => {
+      this.resolveClosed = resolve;
+    });
+  }
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -59,11 +65,13 @@ export class DdpClient {
         reject(new Error("Rocket.Chat realtime websocket failed."));
       });
 
-      ws.addEventListener("close", () => {
-        this.debug("websocket close");
-        const error = new Error("Rocket.Chat realtime websocket closed.");
+      ws.addEventListener("close", (event) => {
+        this.debug("websocket close", { code: event.code, reason: event.reason, wasClean: event.wasClean });
+        const error = new Error(closeMessage(event));
         this.connected?.reject(error);
+        this.connected = undefined;
         this.rejectAll(error);
+        this.resolveClosed(error);
       });
     });
   }
@@ -74,7 +82,12 @@ export class DdpClient {
       this.pending.set(id, { resolve, reject });
     });
     this.debug("send method", { id, method });
-    this.send({ msg: "method", id, method, params });
+    try {
+      this.send({ msg: "method", id, method, params });
+    } catch (error) {
+      this.pending.delete(id);
+      return Promise.reject(toError(error));
+    }
     return promise;
   }
 
@@ -87,8 +100,17 @@ export class DdpClient {
       });
     });
     this.debug("send sub", { id, name, params });
-    this.send({ msg: "sub", id, name, params });
+    try {
+      this.send({ msg: "sub", id, name, params });
+    } catch (error) {
+      this.ready.delete(id);
+      return Promise.reject(toError(error));
+    }
     return promise;
+  }
+
+  waitForClose(): Promise<Error> {
+    return this.closed;
   }
 
   close(): void {
@@ -141,8 +163,12 @@ export class DdpClient {
   }
 
   private send(message: Record<string, unknown>): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error("Rocket.Chat realtime websocket is not open.");
+    }
+
     this.debug("send", messageSummary(message));
-    this.ws?.send(JSON.stringify(message));
+    this.ws.send(JSON.stringify(message));
   }
 
   private nextId(): string {
@@ -170,6 +196,15 @@ export class DdpClient {
 
     console.log(`[debug:ddp] ${message}${data === undefined ? "" : ` ${JSON.stringify(data)}`}`);
   }
+}
+
+function closeMessage(event: CloseEvent): string {
+  const detail = event.code ? ` (code ${event.code}${event.reason ? `: ${event.reason}` : ""})` : "";
+  return `Rocket.Chat realtime websocket closed${detail}.`;
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function messageSummary(message: Record<string, unknown>): Record<string, unknown> {

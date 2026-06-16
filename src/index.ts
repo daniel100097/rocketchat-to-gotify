@@ -30,6 +30,8 @@ const debugEnabled = envFlag("DEBUG", false);
 const hideDetails = envFlag("HIDE_DETAILS", false);
 const gotifyPriority = Number(Bun.env.GOTIFY_PRIORITY ?? "5");
 const subscribeDelayMs = 1500;
+const reconnectBaseDelayMs = 5000;
+const reconnectMaxDelayMs = 60000;
 const roomFilter = parseList(Bun.env.ROOMS);
 const seen = new Set<string>();
 
@@ -37,25 +39,54 @@ debug("loading rooms");
 const rooms = filterRooms(await getRooms());
 const roomsById = new Map(rooms.map((room) => [room.rid, room]));
 const wsEndpoint = websocketEndpoint(rocketChatEndpoint);
-const client = new DdpClient(wsEndpoint, (changed) => {
-  void handleChanged(changed).catch((error) => {
-    console.error(error instanceof Error ? error.message : error);
-  });
-});
 
-debug("connecting websocket", { endpoint: wsEndpoint });
-await client.connect();
-debug("resuming Rocket.Chat session");
-await client.call("login", [{ resume: authToken }]);
-debug("session resumed");
+await watchForever();
 
-for (const [index, room] of rooms.entries()) {
-  await subscribeToRoom(room, index + 1, rooms.length);
+async function watchForever(): Promise<never> {
+  let consecutiveFailures = 0;
+
+  while (true) {
+    const client = createClient();
+
+    try {
+      await connectAndSubscribe(client);
+      consecutiveFailures = 0;
+      console.log(`Watching ${rooms.length} Rocket.Chat rooms.`);
+
+      const closeError = await client.waitForClose();
+      debug("connection closed", { reason: closeError.message });
+      console.log(closeError.message);
+    } catch (error) {
+      client.close();
+      console.error(`Rocket.Chat realtime connection failed: ${errorMessage(error)}`);
+    }
+
+    consecutiveFailures += 1;
+    const waitMs = reconnectDelayMs(consecutiveFailures);
+    console.log(`Reconnecting to Rocket.Chat in ${Math.ceil(waitMs / 1000)}s.`);
+    await sleep(waitMs);
+  }
 }
 
-console.log(`Watching ${rooms.length} Rocket.Chat rooms.`);
+function createClient(): DdpClient {
+  return new DdpClient(wsEndpoint, (changed) => {
+    void handleChanged(changed).catch((error) => {
+      console.error(errorMessage(error));
+    });
+  });
+}
 
-await new Promise(() => undefined);
+async function connectAndSubscribe(client: DdpClient): Promise<void> {
+  debug("connecting websocket", { endpoint: wsEndpoint });
+  await client.connect();
+  debug("resuming Rocket.Chat session");
+  await client.call("login", [{ resume: authToken }]);
+  debug("session resumed");
+
+  for (const [index, room] of rooms.entries()) {
+    await subscribeToRoom(client, room, index + 1, rooms.length);
+  }
+}
 
 async function getRooms(): Promise<Room[]> {
   const response = await fetch(new URL("/api/v1/subscriptions.get", rocketChatEndpoint), {
@@ -90,7 +121,7 @@ function filterRooms(rooms: Room[]): Room[] {
   return filtered;
 }
 
-async function subscribeToRoom(room: Room, index: number, total: number): Promise<void> {
+async function subscribeToRoom(client: DdpClient, room: Room, index: number, total: number): Promise<void> {
   while (true) {
     try {
       debug("subscribing room", { progress: `${index}/${total}`, room: roomLabel(room), rid: room.rid });
@@ -318,6 +349,14 @@ function rateLimitWaitMs(error: unknown): number | undefined {
   }
 
   return undefined;
+}
+
+function reconnectDelayMs(attempt: number): number {
+  return Math.min(reconnectBaseDelayMs * 2 ** Math.max(0, attempt - 1), reconnectMaxDelayMs);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function sleep(ms: number): Promise<void> {
